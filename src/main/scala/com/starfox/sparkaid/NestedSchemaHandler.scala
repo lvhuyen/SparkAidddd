@@ -33,13 +33,27 @@ class NestedSchemaHandler(val separator:String = "___", val arrayDenotation: Str
 
   @scala.annotation.tailrec
   final def flattenAndExplode(df: DataFrame): DataFrame = {
-    val cols: Array[Column] = getFieldsInfoForFlattening(df.schema, explodedArrayType = false)
-      .map {
-        case seg +: Seq() =>
-          expr(seg.map(chunk => f"`$chunk`").mkString(".")).alias(buildFlattenedFieldName1Layer(seg))
-        case seg +: _ =>
-          explode(expr(seg.map(chunk => f"`$chunk`").mkString("."))).alias(buildFlattenedFieldName1Layer(seg))
-      }
+    val cols: Vector[Column] = getFieldsInfoForFlattening(df.schema, explodedArrayType = false)
+      .foldLeft((Vector.empty[Column], false))((cols, i) => {
+        i match {
+          case seg +: Seq() =>
+            (cols._1 :+ expr(seg.map(chunk => f"`$chunk`").mkString(".")).alias(buildFlattenedFieldName1Layer(seg)),
+              cols._2)
+          case seg +: _ =>
+            val curCol =
+              if (!cols._2) explode(expr(seg.map(chunk => f"`$chunk`").mkString("."))).alias(buildFlattenedFieldName1Layer(seg))
+              else expr(seg.map(chunk => f"`$chunk`").mkString(".")).alias(buildFlattenedFieldName1Layer(seg))
+            (cols._1 :+ curCol, true)
+        }
+      })._1
+//
+//    val cols: Array[Column] = getFieldsInfoForFlattening(df.schema, explodedArrayType = false)
+//      .map {
+//        case seg +: Seq() =>
+//          expr(seg.map(chunk => f"`$chunk`").mkString(".")).alias(buildFlattenedFieldName1Layer(seg))
+//        case seg +: _ =>
+//          explode(expr(seg.map(chunk => f"`$chunk`").mkString("."))).alias(buildFlattenedFieldName1Layer(seg))
+//      }
     val ret = df.select(cols:_*)
 
     ret.schema.count(_.dataType match {
