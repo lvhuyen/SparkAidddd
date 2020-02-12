@@ -1,4 +1,4 @@
-//package com.foxsports.dl.sourcing.udf.auth0
+package com.starfox.sparkaid
 
 import java.util.regex.Pattern
 
@@ -88,7 +88,7 @@ class NestedSchemaHandler(val separator:String = "___", val arrayDenotation: Str
               getFieldsInfoForFlattening(e).map(Vector(name) ++ _)
             case _ => Array(Vector(name))
           }
-        else Array(Vector(name))
+        else Array(Vector(name) ++ Vector(Vector.empty[String]))
 
       case _ => Array(Vector(name))
     }
