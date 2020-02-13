@@ -3,7 +3,7 @@ package com.starfox.sparkaid
 import java.util.regex.Pattern
 
 import org.apache.spark.sql.{Column, DataFrame}
-import org.apache.spark.sql.functions.{col, expr, explode_outer => explode}
+import org.apache.spark.sql.functions.{col, expr, posexplode_outer => explode}
 import org.apache.spark.sql.types.{ArrayType, DataType, StructField, StructType}
 
 import scala.collection.mutable.ListBuffer
@@ -41,6 +41,7 @@ class NestedSchemaHandler(val separator:String = "___", val arrayDenotation: Str
               cols._2)
           case seg +: tail =>
             val curCol =
+//              if (!cols._2) explode(expr(seg.map(chunk => f"`$chunk`").mkString("."))).as(Seq("a","b"))
               if (!cols._2) explode(expr(seg.map(chunk => f"`$chunk`").mkString("."))).alias(buildFlattenedFieldName1Layer(seg) +
                 (if (tail.isEmpty) "" else this.arrayDenotation))
               else expr(seg.map(chunk => f"`$chunk`").mkString(".")).alias(buildFlattenedFieldName1Layer(seg))
@@ -128,9 +129,8 @@ class NestedSchemaHandler(val separator:String = "___", val arrayDenotation: Str
           }
         // adding a subtree children list
         case (Right(children), chunk +: tail) =>
-          val (isArray, fieldName) =
-            if (chunk.endsWith(arrayDenotation)) (true, chunk.dropRight(arrayDenotation.length))
-            else (false, chunk)
+          val isArray = chunk.endsWith(arrayDenotation) && rawField.dataType.typeName == "array"
+          val fieldName = if (isArray) chunk.dropRight(arrayDenotation.length) else chunk
           val curSubTree: SchemaNode = children.find(_.segmentName.equals(fieldName)) match {
             // if an existing nested tree is found, then adding the new field to this tree
             case Some(c) =>
