@@ -1,25 +1,21 @@
 {
   "first_name" : "Sammy",
   "last_name" : "Shark",
-  "location" : "Ocean",
   "websites" : [
     {
       "description" : "work",
       "URL" : [
-        {"secured":  false,
-          "URI":  "http://digitalocean.com/"},
-        {"secured":  true,
-          "URI":  "https://digitalocean.com/"}
-      ]
+        "http://digitalocean.com/",
+        "http://www.digitalocean.com/",
+        "https://www.digitalocean.com/"
+        ]
     },
     {
       "description" : "tutorials",
       "URL" : [
-        {"secured":  false,
-          "URI":  "http://tutorial.com/"},
-        {"secured":  true,
-          "URI":  "https://tutorial.com/"}
-      ]
+        "https://digi.io/community/tutorials",
+        "https://www.digitalocean.com/community/tutorials"
+        ]
     }
   ],
   "social_media" : [
@@ -35,5 +31,6 @@
       "description" : "github",
       "link" : "https://github.com/digitalocean"
     }
-  ]
+  ],
+  "location" : "Ocean"
 }

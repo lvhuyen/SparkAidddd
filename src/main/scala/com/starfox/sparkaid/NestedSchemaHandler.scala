@@ -25,25 +25,31 @@ class NestedSchemaHandler(val separator:String = "___", val arrayDenotation: Str
   }
 
   def flatten(df: DataFrame): DataFrame = {
-    val cols: Array[Column] = getFieldsInfoForFlattening(df.schema).map(field => {
-      expr(field.flatten.map(chunk => f"`$chunk`").mkString(".")).alias(buildFlattenedFieldName(field))
-    })
+    val cols: Array[Column] = getFieldsInfoForFlattening(df.schema).map(
+      field => expr(field.map(chunk => chunk.map(segment => f"`$segment`").mkString("."))
+        .grouped(2).map(_.mkString("."))
+        .reduceLeft((left, right) => s"transform($left, x -> x.$right)"))
+        .alias(buildFlattenedFieldName(field))
+    )
     df.select(cols:_*)
   }
 
-  @scala.annotation.tailrec
   final def flattenAndExplode(df: DataFrame): DataFrame = {
-    val cols: Vector[Column] = getFieldsInfoForFlattening(df.schema, stopAtArray = false)
+    innerFlattenAndExplode(df)
+  }
+
+  @scala.annotation.tailrec
+  private def innerFlattenAndExplode(df: DataFrame, normalizeRootSegment: Boolean = true): DataFrame = {
+    val cols: Vector[Column] = getFieldsInfoForFlattening(df.schema, includeArray = false)
       .foldLeft((Vector.empty[Column], false))((cols, i) => {
         i match {
-          case seg +: Seq() =>
-            (cols._1 :+ expr(seg.map(chunk => f"`$chunk`").mkString(".")).alias(buildFlattenedFieldName1Layer(seg)),
+          case chunk +: Seq() =>
+            (cols._1 :+ expr(chunk.map(segment => f"`$segment`").mkString(".")).alias(buildFlattenedChunkName(chunk, normalizeRootSegment)),
               cols._2)
-          case seg +: tail =>
+          case chunk +: tail =>
             val curCol =
-              if (!cols._2) explode(expr(seg.map(chunk => f"`$chunk`").mkString("."))).alias(buildFlattenedFieldName1Layer(seg) +
-                (if (tail.isEmpty) "" else this.arrayDenotation))
-              else expr(seg.map(chunk => f"`$chunk`").mkString(".")).alias(buildFlattenedFieldName1Layer(seg))
+              if (!cols._2) explode(expr(chunk.map(chunk => f"`$chunk`").mkString("."))).alias(buildFlattenedChunkName(chunk, normalizeRootSegment) + (if (tail.isEmpty) "" else this.arrayDenotation))
+              else expr(chunk.map(chunk => f"`$chunk`").mkString(".")).alias(buildFlattenedChunkName(chunk, normalizeRootSegment))
             (cols._1 :+ curCol, true)
         }
       })._1
@@ -55,7 +61,7 @@ class NestedSchemaHandler(val separator:String = "___", val arrayDenotation: Str
       case _ => false
     }) match {
       case 0 => ret
-      case _ => flattenAndExplode(ret)
+      case _ => innerFlattenAndExplode(ret, false)
     }
   }
 
@@ -72,6 +78,7 @@ class NestedSchemaHandler(val separator:String = "___", val arrayDenotation: Str
 
       case _ => throw new Exception("the code should never reach this point")
     }
+
     df.select(cols:_*)
   }
 
@@ -83,14 +90,14 @@ class NestedSchemaHandler(val separator:String = "___", val arrayDenotation: Str
    *    For the root-leaf path (structA -> arrayB(struct) -> structC -> structD -> integerE), the output element is a 2-d collection,
    *      Depending on `explodeArrayType`, if true, then the outer layer has 2 elements, one has 2 elements (A, B) and the other has 3 (C, D, E)
    *      otherwise, the outer layer would have only one element: (A, B) */
-  def getFieldsInfoForFlattening(dtype: DataType, name: Vector[String] = Vector.empty, stopAtArray: Boolean = true): Array[Vector[Vector[String]]] = {
+  private def getFieldsInfoForFlattening(dtype: DataType, name: Vector[String] = Vector.empty, includeArray: Boolean = true): Array[Vector[Vector[String]]] = {
     dtype match {
       case st: StructType =>
-        st.fields.flatMap(field => getFieldsInfoForFlattening(field.dataType, Vector(field.name), stopAtArray).map (
+        st.fields.flatMap(field => getFieldsInfoForFlattening(field.dataType, Vector(field.name), includeArray).map (
           child => (name ++ child.head) +: child.tail ))
 
       case ar: ArrayType =>
-        if (stopAtArray)
+        if (includeArray)
           ar.elementType match {
             case e @ (_: StructType | _: ArrayType) =>
               getFieldsInfoForFlattening(e).map(Vector(name) ++ _)
@@ -102,17 +109,15 @@ class NestedSchemaHandler(val separator:String = "___", val arrayDenotation: Str
     }
   }
 
-  private def buildFlattenedFieldName1Layer(raw: Vector[String]): String = {
-    raw.map(safeFieldNameNormalizer).mkString(separator)
+  private def buildFlattenedChunkName(raw: Vector[String], normalizeRootSegment: Boolean = true): String = {
+    if (normalizeRootSegment)
+      raw.map(safeFieldNameNormalizer).mkString(separator)
+    else
+      (raw.head +: raw.tail.map(safeFieldNameNormalizer)).mkString(separator)
   }
 
   private def buildFlattenedFieldName(raw: Vector[Vector[String]]): String = {
-    raw.map(buildFlattenedFieldName1Layer).mkString(actualArrayDenotation)
-  }
-
-  private object SchemaNode {
-    def apply(name: String, leaf: StructField): SchemaNode = new SchemaNode(name, Left(leaf), false)
-    def apply(name: String, isArray: Boolean = false): SchemaNode = new SchemaNode(name, Right(ListBuffer.empty[SchemaNode]), isArray)
+    raw.map(buildFlattenedChunkName(_)).mkString(actualArrayDenotation)
   }
 
   private class SchemaNode(val segmentName: String, val value: Either[StructField, ListBuffer[SchemaNode]], val isArray: Boolean = false) {
@@ -184,5 +189,10 @@ class NestedSchemaHandler(val separator:String = "___", val arrayDenotation: Str
           t.foreach(c => c.printSchema(level + 1))
       }
     }
+  }
+
+  private object SchemaNode {
+    def apply(name: String, leaf: StructField): SchemaNode = new SchemaNode(name, Left(leaf), false)
+    def apply(name: String, isArray: Boolean = false): SchemaNode = new SchemaNode(name, Right(ListBuffer.empty[SchemaNode]), isArray)
   }
 }
